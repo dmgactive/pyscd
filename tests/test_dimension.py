@@ -86,4 +86,29 @@ class TestDimension(unittest.TestCase):
                         0, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(self.h5dim), 1)
-        self.assertEqual(str(self.h5dim[0]), expected)
+        self.assertEqual(str(self.h5dim[1]), expected)
+
+    def test_add_new_row(self):
+        df = pd.read_csv('tests/data/add 1 row.csv')
+        df['order'] = df['order'].astype(str)
+        store = pd.HDFStore(self.filename, 'a')
+        store.append('orders', df, data_columns=True, index=False)
+        store.close()
+        self.h5table.flush()
+
+        dim = scd(connection=self.h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in self.h5table.iterrows():
+            print(row[:])
+            # dim.update(row)
+        # self.h5dim.flush()
+
+        expected = str((b'1', 20, b'Completed', b'USD',
+                        0, 1445558400000000000, 7258032000000000000, 1, True))
+
+        self.assertEqual(len(self.h5dim), 2)
+        self.assertEqual(str(self.h5dim[1]), expected)

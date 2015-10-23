@@ -63,6 +63,9 @@ class SlowlyChangingDimension(object):
         except IndexError:
             self.__maxid = -1
 
+    def __exit__(self):
+        self.connection.flush()
+
     def lookup(self, row):
         """Find the key for the newest version of the row.
         """
