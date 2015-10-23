@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import datetime
 import pandas as pd
 import numpy as np
 import tables as tb
@@ -13,7 +14,7 @@ class SlowlyChangingDimension(object):
                  toatt='scd_valid_to',
                  versionatt='scd_version',
                  currentatt='scd_current',
-                 minfrom='1970-01-01',
+                 asof=None,
                  maxto='2199-12-31'):
         if not isinstance(key, str):
             raise ValueError('Key argument must be a string')
@@ -36,8 +37,16 @@ class SlowlyChangingDimension(object):
         self.toatt = toatt
         self.versionatt = versionatt
         self.currentatt = currentatt
-        self.minfrom = pd.to_datetime([minfrom]).astype(np.int64)[0]
-        self.maxto = pd.to_datetime([maxto]).astype(np.int64)[0]
+
+        if not asof:
+            today = datetime.date.today()
+            self.asof = pd.to_datetime(today).astype(np.int64)[0]
+        else:
+            self.asof = pd.to_datetime([asof],
+                yearfirst=True, dayfirst=False).astype(np.int64)[0]
+
+        self.maxto = pd.to_datetime([maxto],
+            yearfirst=True, dayfirst=False).astype(np.int64)[0]
 
         # Create the conditions that we will need
 
@@ -53,12 +62,6 @@ class SlowlyChangingDimension(object):
             self.__maxid = connection[-1:][self.key][0]
         except IndexError:
             self.__maxid = -1
-
-    # def quote(self, attribute):
-    #     if attribute in self._v_string_type:
-    #         return "'{!s}'".format(attribute)
-    #     else:
-    #         return attribute
 
     def lookup(self, row):
         """Find the key for the newest version of the row.
@@ -80,7 +83,7 @@ class SlowlyChangingDimension(object):
             # It is a new member. We add the first version.
             row = self.connection.row
             row[self.key] = self._getnextid()
-            row[self.fromatt] = self.minfrom
+            row[self.fromatt] = self.asof
             row[self.toatt] = self.maxto
             row[self.versionatt] = 1
             row[self.currentatt] = True

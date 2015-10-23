@@ -54,14 +54,15 @@ class TestDimension(unittest.TestCase):
         dim = scd(connection=self.h5dim,
                   lookupatts=['order'],
                   type1atts=[],
-                  type2atts=['line', 'status', 'currency'])
+                  type2atts=['line', 'status', 'currency'],
+                  asof='2015-10-23')
 
         for row in self.h5table.iterrows():
             dim.update(row)
         self.h5dim.flush()
 
         expected = str((b'1', 10, b'Not Delivered', b'USD',
-                        0, 0, 7258032000000000000, 1, True))
+                        0, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(self.h5dim), 1)
         self.assertEqual(str(self.h5dim[0]), expected)
@@ -70,7 +71,8 @@ class TestDimension(unittest.TestCase):
         dim = scd(connection=self.h5dim,
                   lookupatts=['order', 'line'],
                   type1atts=[],
-                  type2atts=['status', 'currency'])
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
 
         for row in self.h5table.iterrows():
             dim.update(row)
@@ -81,7 +83,7 @@ class TestDimension(unittest.TestCase):
         self.h5dim.flush()
 
         expected = str((b'1', 10, b'Not Delivered', b'USD',
-                        0, 0, 7258032000000000000, 1, True))
+                        0, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(self.h5dim), 1)
         self.assertEqual(str(self.h5dim[0]), expected)
