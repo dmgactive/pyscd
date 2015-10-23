@@ -48,70 +48,103 @@ class TestDimension(unittest.TestCase):
 
     def tearDown(self):
         self.h5file.close()
-        # if os.path.isfile(self.filename):
-            # os.remove(self.filename)
+        if os.path.isfile(self.filename):
+            os.remove(self.filename)
 
     def test_import_new_data_fill_scd_columns(self):
-        self.h5table = self.h5file.root.orders.table
-        self.h5dim = self.h5file.root.dimorders.table
+        into(self.filename, 'tests/data/orders x1.csv')
 
-        dim = scd(connection=self.h5dim,
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
                   lookupatts=['order'],
                   type1atts=[],
                   type2atts=['line', 'status', 'currency'],
                   asof='2015-10-23')
 
-        for row in self.h5table.iterrows():
+        for row in h5table.iterrows():
             dim.update(row)
-        self.h5dim.flush()
+        h5dim.flush()
 
         expected = str((b'1', 10, b'Not Delivered', b'USD',
                         0, 1445558400000000000, 7258032000000000000, 1, True))
 
-        self.assertEqual(len(self.h5dim), 1)
-        self.assertEqual(str(self.h5dim[0]), expected)
+        self.assertEqual(len(h5dim), 1)
+        self.assertEqual(str(h5dim[0]), expected)
 
-    # def test_import_same_data_does_not_duplicate_row(self):
-    #     dim = scd(connection=self.h5dim,
-    #               lookupatts=['order', 'line'],
-    #               type1atts=[],
-    #               type2atts=['status', 'currency'],
-    #               asof='2015-10-23')
-    #
-    #     for row in self.h5table.iterrows():
-    #         dim.update(row)
-    #     self.h5dim.flush()
-    #
-    #     for row in self.h5table.iterrows():
-    #         dim.update(row)
-    #     self.h5dim.flush()
-    #
-    #     expected = str((b'1', 10, b'Not Delivered', b'USD',
-    #                     0, 1445558400000000000, 7258032000000000000, 1, True))
-    #
-    #     self.assertEqual(len(self.h5dim), 1)
-    #     self.assertEqual(str(self.h5dim[1]), expected)
-    #
-    # def test_add_new_row(self):
-    #     df = pd.read_csv('tests/data/add 1 row.csv')
-    #     df['order'] = df['order'].astype(str)
-    #     store = pd.HDFStore(self.filename, 'a')
-    #     store.append('orders', df, data_columns=True, index=False)
-    #     store.close()
-    #
-    #     dim = scd(connection=self.h5dim,
-    #               lookupatts=['order', 'line'],
-    #               type1atts=[],
-    #               type2atts=['status', 'currency'],
-    #               asof='2015-10-23')
-    #
-    #     for row in self.h5table.iterrows():
-    #         print(row[:])
-    #         # dim.update(row)
-    #     # self.h5dim.flush()
-    #
-    #     expected = str((b'1', 20, b'Completed', b'USD',
-    #                     0, 1445558400000000000, 7258032000000000000, 1, True))
-    #
-    #     self.assertEqual(len(self.h5dim), 2)
-    #     self.assertEqual(str(self.h5dim[1]), expected)
+        h5file.close()
+
+    def test_import_same_data_does_not_duplicate_row(self):
+        into(self.filename, 'tests/data/orders x1.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        expected = str((b'1', 10, b'Not Delivered', b'USD',
+                        0, 1445558400000000000, 7258032000000000000, 1, True))
+
+        self.assertEqual(len(h5dim), 1)
+        self.assertEqual(str(h5dim[0]), expected)
+
+        h5file.close()
+
+    def test_add_new_row(self):
+        # Update dimension with first file
+        into(self.filename, 'tests/data/orders x1.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+        h5file.close()
+
+        # Update dimension with second file
+        into(self.filename, 'tests/data/add 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        expected = str((b'1', 20, b'Completed', b'USD',
+                        1, 1445558400000000000, 7258032000000000000, 1, True))
+
+        self.assertEqual(len(h5dim), 2)
+        self.assertEqual(str(h5dim[1]), expected)
+
+        h5file.close()
