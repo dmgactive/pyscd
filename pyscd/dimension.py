@@ -58,6 +58,9 @@ class SlowlyChangingDimension(object):
         self.keylookupcondition += ' & ({!s} == {!s})'.\
             format(self.currentatt, True)
 
+        self.allkeyscondition = ' & '.join(['({!s} == _{!s})'.\
+            format(att, att) for att in self.lookupatts])
+
         try:
             self.__maxid = connection[-1:][self.key][0]
         except IndexError:
@@ -66,35 +69,76 @@ class SlowlyChangingDimension(object):
     def __exit__(self):
         self.connection.flush()
 
-    def lookup(self, row):
+    def lookup(self, tablerow):
         """Find the key for the newest version of the row.
         """
-        condvars = {'_' + att: row[att] for att in self.lookupatts}
-        key = self.connection.get_where_list(self.keylookupcondition, condvars)
-        if len(key) > 0:
-            return key[0]
+        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
+        row = self.connection.read_where(self.keylookupcondition, condvars)
+        if row:
+            return row
         return None
 
-    def update(self, tablerow):
-        """Update the dimension by inserting new rows and adding a new versions
+    def getrowbykey(self, key):
+        row = self.connection.read_where('({!s} == key)'.format(self.key),
+                                        {'key': key})
+        return row
+
+    def update(self, row):
+        """Update the dimension by inserting new rows and adding a new version
            of modified rows.
         """
-
         # Get the newest version
-        key = self.lookup(tablerow)
-        if key is None:
+        other = self.lookup(row)
+        if other is None:
             # It is a new member. We add the first version.
-            row = self.connection.row
-            row[self.key] = self._getnextid()
-            row[self.fromatt] = self.asof
-            row[self.toatt] = self.maxto
-            row[self.versionatt] = 1
-            row[self.currentatt] = True
+            self.insert(row)
+        else:
+            # There is an existing version. Check if the attributes are
+            # identical.
+            print(row[:])
+            print(other[:])
 
-            for col in self.attributes:
-                row[col] = tablerow[col]
+            # Check if any type 1 attribute was modified
+            for att in self.type1atts:
+                if row[att] != other[att]:
+                    self.__perform_type1_updates(row, other)
+                    break
 
-            row.append()
+            # Check if any type 2 attribute was modified
+            for att in self.type2atts:
+                if row[att] != other[att]:
+                    self.__track_type2_history(row, other)
+                    break
+
+    def insert(self, newrow):
+        """Insert the given row.
+        """
+        row = self.connection.row
+
+        # Fill new row columns
+        for col in self.attributes:
+            row[col] = newrow[col]
+
+        # Fill SCD columns
+        row[self.key] = self._getnextid()
+        row[self.fromatt] = self.asof
+        row[self.toatt] = self.maxto
+        row[self.versionatt] = 1
+        row[self.currentatt] = True
+
+        row.append()
+
+    def __perform_type1_updates(self, tablerow, other):
+        """Find and update all rows with same Lookup Attributes.
+        """
+        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
+        for row in self.connection.where(self.allkeyscondition, condvars):
+            for att in self.type1atts:
+                row[att] = tablerow[att]
+            row.update()
+
+    def __track_type2_history(self, row, other):
+        pass
 
     def _getnextid(self):
         self.__maxid += 1
