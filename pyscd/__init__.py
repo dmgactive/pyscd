@@ -1,0 +1,1 @@
+from pyscd.dimension import SlowlyChangingDimension
