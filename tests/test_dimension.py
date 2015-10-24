@@ -48,8 +48,8 @@ class TestDimension(unittest.TestCase):
 
     def tearDown(self):
         self.h5file.close()
-        # if os.path.isfile(self.filename):
-            # os.remove(self.filename)
+        if os.path.isfile(self.filename):
+            os.remove(self.filename)
 
     def test_import_new_data_fill_scd_columns(self):
         into(self.filename, 'tests/data/orders x1.csv')
@@ -241,5 +241,113 @@ class TestDimension(unittest.TestCase):
         expected = str((b'1', 10, b'Completed', b'USD',
                         3, 1445558400000000000, 7258032000000000000, 2, True))
         self.assertEqual(str(h5dim[2]), expected)
+
+        h5file.close()
+
+    def test_update_info_new_rows(self):
+        # Update dimension with first file
+        into(self.filename, 'tests/data/add 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        self.assertEqual(dim.new_rows, 2)
+        self.assertEqual(dim.updated_type1_rows, 0)
+        self.assertEqual(dim.updated_type2_rows, 0)
+
+        h5file.close()
+
+    def test_update_info_updated_type1_rows(self):
+        # Update dimension with first file
+        into(self.filename, 'tests/data/add 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=['status'],
+                  type2atts=['currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+        h5file.close()
+
+        # Update dimension with second file
+        into(self.filename, 'tests/data/modify 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=['status'],
+                  type2atts=['currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        self.assertEqual(dim.new_rows, 0)
+        self.assertEqual(dim.updated_type1_rows, 1)
+        self.assertEqual(dim.updated_type2_rows, 0)
+
+        h5file.close()
+
+    def test_update_info_updated_type2_rows(self):
+        # Update dimension with first file
+        into(self.filename, 'tests/data/add 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+        h5file.close()
+
+        # Update dimension with second file
+        into(self.filename, 'tests/data/modify 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        self.assertEqual(dim.new_rows, 0)
+        self.assertEqual(dim.updated_type1_rows, 0)
+        self.assertEqual(dim.updated_type2_rows, 1)
 
         h5file.close()
