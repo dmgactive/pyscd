@@ -103,7 +103,7 @@ class SlowlyChangingDimension(object):
 
         if not asof:
             today = datetime.date.today()
-            self.asof = pd.to_datetime(today).astype(np.int64)[0]
+            self.asof = pd.to_datetime([today]).astype(np.int64)[0]
         else:
             self.asof = pd.to_datetime([asof],
                 yearfirst=True, dayfirst=False).astype(np.int64)[0]
