@@ -69,7 +69,7 @@ class TestDimension(unittest.TestCase):
         h5dim.flush()
 
         expected = str((b'1', 10, b'Not Delivered', b'USD',
-                        0, 1445558400000000000, 7258032000000000000, 1, True))
+                        1, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(h5dim), 1)
         self.assertEqual(str(h5dim[0]), expected)
@@ -98,7 +98,7 @@ class TestDimension(unittest.TestCase):
         h5dim.flush()
 
         expected = str((b'1', 10, b'Not Delivered', b'USD',
-                        0, 1445558400000000000, 7258032000000000000, 1, True))
+                        1, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(h5dim), 1)
         self.assertEqual(str(h5dim[0]), expected)
@@ -142,7 +142,7 @@ class TestDimension(unittest.TestCase):
         h5dim.flush()
 
         expected = str((b'1', 20, b'Completed', b'USD',
-                        1, 1445558400000000000, 7258032000000000000, 1, True))
+                        2, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(h5dim), 2)
         self.assertEqual(str(h5dim[1]), expected)
@@ -186,7 +186,7 @@ class TestDimension(unittest.TestCase):
         h5dim.flush()
 
         expected = str((b'1', 10, b'Completed', b'USD',
-                        0, 1445558400000000000, 7258032000000000000, 1, True))
+                        1, 1445558400000000000, 7258032000000000000, 1, True))
 
         self.assertEqual(len(h5dim), 2)
         self.assertEqual(str(h5dim[0]), expected)
@@ -229,19 +229,17 @@ class TestDimension(unittest.TestCase):
             dim.update(row)
         h5dim.flush()
 
-        print(h5dim[:])
-
         # Check if one row was inserted
         self.assertEqual(len(h5dim), 3)
 
         # Check first version row
         expected = str((b'1', 10, b'Not Delivered', b'USD',
-                        0, 1445558400000000000, 1445558400000000000, 1, False))
+                        1, 1445558400000000000, 1445558400000000000, 1, False))
         self.assertEqual(str(h5dim[0]), expected)
 
         # Check second version row
         expected = str((b'1', 10, b'Completed', b'USD',
-                        2, 1445558400000000000, 7258032000000000000, 2, True))
+                        3, 1445558400000000000, 7258032000000000000, 2, True))
         self.assertEqual(str(h5dim[2]), expected)
 
         h5file.close()
