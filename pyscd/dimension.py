@@ -195,7 +195,8 @@ class SlowlyChangingDimension(object):
 
             # Check if any type 2 attribute was modified
             for att in self.type2atts:
-                if row[att] != other[att]:
+                if (pd.notnull(row[att]) or pd.notnull(other[att])) \
+                    and (row[att] != other[att]):
                     self.__track_type2_history(row, other)
                     self._type2_modified_count += 1
                     break
