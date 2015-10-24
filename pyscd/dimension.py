@@ -19,13 +19,13 @@ class SlowlyChangingDimension(object):
         if not isinstance(key, str):
             raise ValueError('Key argument must be a string')
         if not isinstance(lookupatts, list) or not len(lookupatts):
-            raise ValueError('No natural key given')
+            raise ValueError('No lookup key(s) given')
         if not isinstance(type1atts, list):
             raise ValueError('Type 1 attributes argument must be a list')
         if not isinstance(type2atts, list):
             raise ValueError('Type 2 attributes argument must be a list')
         if not isinstance(connection, tb.Table):
-            raise TypeError('Connection argument must point to a PyTables table')
+            raise TypeError('Connection argument must be a PyTables table')
 
         self.connection = connection
         self.lookupatts = lookupatts
@@ -64,7 +64,7 @@ class SlowlyChangingDimension(object):
         try:
             self.__maxid = connection[-1:][self.key][0]
         except IndexError:
-            self.__maxid = -1
+            self.__maxid = 0
 
     def __exit__(self):
         self.connection.flush()
@@ -90,6 +90,7 @@ class SlowlyChangingDimension(object):
         """
         # Get the newest version
         other = self.lookup(row)
+
         if other is None:
             # It is a new member. We add the first version.
             self.insert(row)
@@ -109,12 +110,12 @@ class SlowlyChangingDimension(object):
                     self.__track_type2_history(row, other)
                     break
 
-    def insert(self, newrow, version=1):
+    def insert(self, rowdata, version=1):
         row = self.connection.row
 
         # Fill new row columns
         for col in self.attributes:
-            row[col] = newrow[col]
+            row[col] = rowdata[col]
 
         # Fill SCD columns
         row[self.key] = self._getnextid()
@@ -125,13 +126,10 @@ class SlowlyChangingDimension(object):
 
         row.append()
 
-    def __perform_type1_updates(self, tablerow, other):
+    def __perform_type1_updates(self, rowdata, other):
         """Find and update all rows with same Lookup Attributes.
         """
-        # Build the dict to be used as condvars of a query, like this:
-        # {order: _order, line: _line}
-        # This dict is then passed to where or get_where_list functions
-        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
+        condvars = self._build_condvars(rowdata)
 
         # Find coordinates of all rows using lookup columns
         coords = self.connection.get_where_list(
@@ -140,16 +138,13 @@ class SlowlyChangingDimension(object):
 
         # Update type 1 attributes
         for type1att in self.type1atts:
-            rows[type1att][:] = tablerow[type1att]
+            rows[type1att][:] = rowdata[type1att]
 
         # Update dimension
         self.connection.modify_coordinates(coords, rows)
 
     def __track_type2_history(self, tablerow, other):
-        # Build the dict to be used as condvars of a query, like this:
-        # {order: _order, line: _line}
-        # This dict is then passed to where or get_where_list functions
-        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
+        condvars = self._build_condvars(tablerow)
 
         # Find coordinates of the current row using lookup columns
         coord = self.connection.get_where_list(
@@ -169,3 +164,12 @@ class SlowlyChangingDimension(object):
     def _getnextid(self):
         self.__maxid += 1
         return self.__maxid
+
+    def _build_condvars(self, row):
+        # Build the dict to be used as condvars of a query, like this:
+        # {order: _order, line: _line}
+        # This dict can then passed to PyTables Table.where()
+        # and Table.get_where_list() functions
+        # Source: http://www.pytables.org/usersguide/libref/structured_storage.html#tables.Table.where
+        condvars = {'_' + att: row[att] for att in self.lookupatts}
+        return condvars
