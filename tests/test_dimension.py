@@ -48,8 +48,8 @@ class TestDimension(unittest.TestCase):
 
     def tearDown(self):
         self.h5file.close()
-        if os.path.isfile(self.filename):
-            os.remove(self.filename)
+        # if os.path.isfile(self.filename):
+            # os.remove(self.filename)
 
     def test_import_new_data_fill_scd_columns(self):
         into(self.filename, 'tests/data/orders x1.csv')
@@ -190,5 +190,58 @@ class TestDimension(unittest.TestCase):
 
         self.assertEqual(len(h5dim), 2)
         self.assertEqual(str(h5dim[0]), expected)
+
+        h5file.close()
+
+    def test_modify_type_2_column(self):
+        # Update dimension with first file
+        into(self.filename, 'tests/data/add 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+        h5file.close()
+
+        # Update dimension with second file
+        into(self.filename, 'tests/data/modify 1 row.csv')
+
+        h5file = tb.open_file(self.filename, mode='a')
+        h5table = h5file.root.orders.table
+        h5dim = h5file.root.dimorders.table
+
+        dim = scd(connection=h5dim,
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for row in h5table.iterrows():
+            dim.update(row)
+        h5dim.flush()
+
+        print(h5dim[:])
+
+        # Check if one row was inserted
+        self.assertEqual(len(h5dim), 3)
+
+        # Check first version row
+        expected = str((b'1', 10, b'Not Delivered', b'USD',
+                        0, 1445558400000000000, 1445558400000000000, 1, False))
+        self.assertEqual(str(h5dim[0]), expected)
+
+        # Check second version row
+        expected = str((b'1', 10, b'Completed', b'USD',
+                        2, 1445558400000000000, 7258032000000000000, 2, True))
+        self.assertEqual(str(h5dim[2]), expected)
 
         h5file.close()

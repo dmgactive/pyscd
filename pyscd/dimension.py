@@ -53,12 +53,12 @@ class SlowlyChangingDimension(object):
         self._v_types = self.connection.description._v_types
         self._v_string_type = [k for k, v in self._v_types.items()
                                     if v == 'string']
-        self.keylookupcondition = ' & '.join(['({!s} == _{!s})'.\
+        self.currentkeylookupcondition = ' & '.join(['({!s} == _{!s})'.\
             format(att, att) for att in self.lookupatts])
-        self.keylookupcondition += ' & ({!s} == {!s})'.\
+        self.currentkeylookupcondition += ' & ({!s} == {!s})'.\
             format(self.currentatt, True)
 
-        self.allkeyscondition = ' & '.join(['({!s} == _{!s})'.\
+        self.allkeyslookupcondition = ' & '.join(['({!s} == _{!s})'.\
             format(att, att) for att in self.lookupatts])
 
         try:
@@ -73,7 +73,8 @@ class SlowlyChangingDimension(object):
         """Find the key for the newest version of the row.
         """
         condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
-        row = self.connection.read_where(self.keylookupcondition, condvars)
+        row = self.connection.read_where(
+            self.currentkeylookupcondition, condvars)
         if row:
             return row
         return None
@@ -95,8 +96,6 @@ class SlowlyChangingDimension(object):
         else:
             # There is an existing version. Check if the attributes are
             # identical.
-            print(row[:])
-            print(other[:])
 
             # Check if any type 1 attribute was modified
             for att in self.type1atts:
@@ -110,9 +109,7 @@ class SlowlyChangingDimension(object):
                     self.__track_type2_history(row, other)
                     break
 
-    def insert(self, newrow):
-        """Insert the given row.
-        """
+    def insert(self, newrow, version=1):
         row = self.connection.row
 
         # Fill new row columns
@@ -123,7 +120,7 @@ class SlowlyChangingDimension(object):
         row[self.key] = self._getnextid()
         row[self.fromatt] = self.asof
         row[self.toatt] = self.maxto
-        row[self.versionatt] = 1
+        row[self.versionatt] = version
         row[self.currentatt] = True
 
         row.append()
@@ -131,14 +128,43 @@ class SlowlyChangingDimension(object):
     def __perform_type1_updates(self, tablerow, other):
         """Find and update all rows with same Lookup Attributes.
         """
+        # Build the dict to be used as condvars of a query, like this:
+        # {order: _order, line: _line}
+        # This dict is then passed to where or get_where_list functions
         condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
-        for row in self.connection.where(self.allkeyscondition, condvars):
-            for att in self.type1atts:
-                row[att] = tablerow[att]
-            row.update()
 
-    def __track_type2_history(self, row, other):
-        pass
+        # Find coordinates of all rows using lookup columns
+        coords = self.connection.get_where_list(
+            self.allkeyslookupcondition, condvars)
+        rows = self.connection.read_coordinates(coords)
+
+        # Update type 1 attributes
+        for type1att in self.type1atts:
+            rows[type1att][:] = tablerow[type1att]
+
+        # Update dimension
+        self.connection.modify_coordinates(coords, rows)
+
+    def __track_type2_history(self, tablerow, other):
+        # Build the dict to be used as condvars of a query, like this:
+        # {order: _order, line: _line}
+        # This dict is then passed to where or get_where_list functions
+        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
+
+        # Find coordinates of the current row using lookup columns
+        coord = self.connection.get_where_list(
+            self.currentkeylookupcondition, condvars)
+        row = self.connection.read_coordinates(coord)
+
+        # Update valid to and current columns
+        row[self.toatt] = self.asof
+        row[self.currentatt] = False
+
+        # Update dimension
+        self.connection.modify_coordinates(coord, row)
+
+        # Insert new version of the row
+        self.insert(tablerow, version=other[self.versionatt] + 1)
 
     def _getnextid(self):
         self.__maxid += 1
