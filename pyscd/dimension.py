@@ -100,6 +100,7 @@ class SlowlyChangingDimension(object):
         self.toatt = toatt
         self.versionatt = versionatt
         self.currentatt = currentatt
+        # TODO: use hash column to check if row was modified
 
         if not asof:
             today = datetime.date.today()
