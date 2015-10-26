@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='PySCD',
-    version='1.0.2',
+    version = __import__('pyscd').__version__,
     description=('Slowly Changing Dimension management '
                  'supporting SCD types 1 and 2'),
     url='https://github.com/rtogo/pyscd',
@@ -20,6 +20,6 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
-    packages=find_packages(exclude=['docs', 'tests*']),
+    packages=['pyscd'],
     install_requires=['numpy', 'tables'],
 )
