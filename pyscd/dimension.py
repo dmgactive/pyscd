@@ -212,17 +212,20 @@ class SlowlyChangingDimension(object):
             # Get the newest version
             other = self.lookup(row)
 
-            # Check if any type 1 attribute was modified
+            # Check for modified type 1 attributes
             for att in self.type1atts:
                 if row[att] != other[att]:
                     self.__perform_type1_updates(row, other)
                     self._type1_modified_count += 1
                     break
 
-            # Check if any type 2 attribute was modified
+            # Check for modified type 2 attributes
             for att in self.type2atts:
-                if (pd.notnull(row[att]) or pd.notnull(other[att])) \
-                    and (row[att] != other[att]):
+                # Is it still necessary to check for null values?
+                # All string columns are store as bytes b'text' now,
+                # so I'm removing this from the condition:
+                # (pd.notnull(row[att]) or pd.notnull(other[att]))
+                if row[att] != other[att]:
                     self.__track_type2_history(row, other)
                     self._type2_modified_count += 1
                     break
