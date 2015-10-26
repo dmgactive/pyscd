@@ -202,11 +202,8 @@ class SlowlyChangingDimension(object):
         keyhashvalue = self._compute_hash_key(row)
         rowhashvalue = self._compute_hash_row(row)
 
-        print('\nVerificando {!s}, hash: {!s}'.format(row[:], keyhashvalue))
-
         if not keyhashvalue in self.__hashtable:
             # It is a new member. We add the first version.
-            print('Inserindo {!s} pela primeira vez'.format(row[:]))
             self.insert(row)
             self._new_count += 1
         elif not rowhashvalue in self.__hashtable[keyhashvalue]:
