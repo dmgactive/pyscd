@@ -245,6 +245,10 @@ class SlowlyChangingDimension(object):
         for type1att in self.type1atts:
             rows[type1att][:] = rowdata[type1att]
 
+        # Update hash
+        for row in rows:
+            row[self.hashatt] = self._compute_hash(row)
+
         # Update dimension
         self.connection.modify_coordinates(coords, rows)
 
@@ -285,13 +289,17 @@ class SlowlyChangingDimension(object):
         condvars = {'_' + att: row[att] for att in self.lookupatts}
         return condvars
 
-    def _hash_row(self, row):
+    def _compute_hash(self, row):
         """Computes hash of the row.
            See hashlib.algorithms_guaranteed for the complete algorithm list.
         """
         m = hashlib.sha1()
 
         for col in self.attributes:
-            m.update(row[col])
+            value = row[col]
+            if not isinstance(value, bytes):
+                value = str(value).encode()
+            m.update(value)
+            print(col, value, m.hexdigest())
 
         return m.hexdigest()
