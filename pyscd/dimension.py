@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import tables as tb
 import hashlib
+from collections import defaultdict
 
 
 class SlowlyChangingDimension(object):
@@ -20,7 +21,6 @@ class SlowlyChangingDimension(object):
                  versionatt='scd_version',
                  currentatt='scd_current',
                  hashatt='scd_hash',
-                 hashalgorithm='SHA1'
                  asof=None):
         """
         Parameters
@@ -109,6 +109,7 @@ class SlowlyChangingDimension(object):
         self.toatt = toatt
         self.versionatt = versionatt
         self.currentatt = currentatt
+        self.hashatt = hashatt
         # TODO: use hash column to check if row was modified
 
         if not asof:
@@ -226,6 +227,7 @@ class SlowlyChangingDimension(object):
         row[self.toatt] = self.maxto
         row[self.versionatt] = version
         row[self.currentatt] = True
+        row[self.hashatt] = self._compute_hash(rowdata)
 
         row.append()
 
@@ -284,12 +286,12 @@ class SlowlyChangingDimension(object):
         return condvars
 
     def _hash_row(self, row):
-        """
+        """Computes hash of the row.
            See hashlib.algorithms_guaranteed for the complete algorithm list.
         """
         m = hashlib.sha1()
 
-        for column in row:
-            m.update(column)
+        for col in self.attributes:
+            m.update(row[col])
 
         return m.hexdigest()
