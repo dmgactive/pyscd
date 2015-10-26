@@ -4,6 +4,8 @@ import datetime
 import pandas as pd
 import numpy as np
 import tables as tb
+import hashlib
+from collections import defaultdict
 
 
 class SlowlyChangingDimension(object):
@@ -18,6 +20,7 @@ class SlowlyChangingDimension(object):
                  maxto='2199-12-31',
                  versionatt='scd_version',
                  currentatt='scd_current',
+                 hashatt='scd_hash',
                  asof=None):
         """
         Parameters
@@ -64,13 +67,19 @@ class SlowlyChangingDimension(object):
             Default '2199-12-31'.
 
         versionatt
-            Optional. String with the of the column to hold the version number.
+            Optional. String with the name of the column to hold the version
+            number.
             Default 'scd_version'.
 
         currentatt
-            Optional. String with the of the column to hold the current version
-            status.
+            Optional. String with the name of the column to hold the current
+            version status.
             Default 'scd_current'.
+
+        hashatt
+            Optional. String with the name of the column to hold the hash of
+            the attributes of each row.
+            Default 'scd_hash'.
 
         asof
             Optional. The date to use for fromatt for the 1st version of a row.
@@ -100,6 +109,8 @@ class SlowlyChangingDimension(object):
         self.toatt = toatt
         self.versionatt = versionatt
         self.currentatt = currentatt
+        self.hashatt = hashatt
+        # TODO: use hash column to check if row was modified
 
         if not asof:
             today = datetime.date.today()
@@ -134,7 +145,7 @@ class SlowlyChangingDimension(object):
         #          & (currentatt == True)
         self.currentkeylookupcondition =\
             self.allkeyslookupcondition +\
-            ' & ({!s} == {!s})'.format(self.currentatt, True)
+            ' & ({!s} == True)'.format(self.currentatt)
 
         # Get the last used key
         try:
@@ -143,6 +154,19 @@ class SlowlyChangingDimension(object):
         except IndexError:
             # The table is empty, so we set __maxid to 0
             self.__maxid = 0
+
+        # Load index
+        self.__hashtable = defaultdict(list)
+
+        indexes = self.connection.get_where_list('({!s} == True)'.
+            format(self.currentatt))
+
+        for index in indexes:
+            row = self.connection[index]
+            rowhashvalue = row[self.hashatt].decode()
+            keyhashvalue = self._compute_hash_key(row)
+
+            self.__hashtable[keyhashvalue].append(rowhashvalue)
 
     def __exit__(self):
         self.connection.flush()
@@ -175,16 +199,21 @@ class SlowlyChangingDimension(object):
         """Update the dimension by inserting new rows, modifying type 1
            attributes and adding a new version of modified rows.
         """
-        # Get the newest version
-        other = self.lookup(row)
+        keyhashvalue = self._compute_hash_key(row)
+        rowhashvalue = self._compute_hash_row(row)
 
-        if other is None:
+        print('\nVerificando {!s}, hash: {!s}'.format(row[:], keyhashvalue))
+
+        if not keyhashvalue in self.__hashtable:
             # It is a new member. We add the first version.
+            print('Inserindo {!s} pela primeira vez'.format(row[:]))
             self.insert(row)
             self._new_count += 1
-        else:
-            # There is an existing version. Check if the attributes are
-            # identical.
+        elif not rowhashvalue in self.__hashtable[keyhashvalue]:
+            # There is an existing version, but with a different hash.
+
+            # Get the newest version
+            other = self.lookup(row)
 
             # Check if any type 1 attribute was modified
             for att in self.type1atts:
@@ -204,6 +233,10 @@ class SlowlyChangingDimension(object):
     def insert(self, rowdata, version=1):
         """Insert the given row.
         """
+        keyhashvalue = self._compute_hash_key(rowdata)
+        rowhashvalue = self._compute_hash_row(rowdata)
+        self.__hashtable[keyhashvalue].append(rowhashvalue)
+
         row = self.connection.row
 
         # Fill new row columns
@@ -216,6 +249,7 @@ class SlowlyChangingDimension(object):
         row[self.toatt] = self.maxto
         row[self.versionatt] = version
         row[self.currentatt] = True
+        row[self.hashatt] = rowhashvalue
 
         row.append()
 
@@ -232,6 +266,10 @@ class SlowlyChangingDimension(object):
         # Update type 1 attributes
         for type1att in self.type1atts:
             rows[type1att][:] = rowdata[type1att]
+
+        # Update hash
+        for row in rows:
+            row[self.hashatt] = self._compute_hash_row(row)
 
         # Update dimension
         self.connection.modify_coordinates(coords, rows)
@@ -272,3 +310,31 @@ class SlowlyChangingDimension(object):
         # Source: http://www.pytables.org/usersguide/libref/structured_storage.html#tables.Table.where
         condvars = {'_' + att: row[att] for att in self.lookupatts}
         return condvars
+
+    def _compute_hash_row(self, row):
+        """Computes hash of the entire row.
+           See hashlib.algorithms_guaranteed for the complete algorithm list.
+        """
+        m = hashlib.sha1()
+
+        for col in self.attributes:
+            value = row[col]
+            if not isinstance(value, bytes):
+                value = str(value).encode()
+            m.update(value)
+
+        return m.hexdigest()
+
+    def _compute_hash_key(self, row):
+        """Computes hash of the key fields.
+           See hashlib.algorithms_guaranteed for the complete algorithm list.
+        """
+        m = hashlib.sha1()
+
+        for col in self.lookupatts:
+            value = row[col]
+            if not isinstance(value, bytes):
+                value = str(value).encode()
+            m.update(value)
+
+        return m.hexdigest()
