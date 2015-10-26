@@ -4,6 +4,7 @@ import datetime
 import pandas as pd
 import numpy as np
 import tables as tb
+import hashlib
 
 
 class SlowlyChangingDimension(object):
@@ -18,6 +19,8 @@ class SlowlyChangingDimension(object):
                  maxto='2199-12-31',
                  versionatt='scd_version',
                  currentatt='scd_current',
+                 hashatt='scd_hash',
+                 hashalgorithm='SHA1'
                  asof=None):
         """
         Parameters
@@ -64,13 +67,19 @@ class SlowlyChangingDimension(object):
             Default '2199-12-31'.
 
         versionatt
-            Optional. String with the of the column to hold the version number.
+            Optional. String with the name of the column to hold the version
+            number.
             Default 'scd_version'.
 
         currentatt
-            Optional. String with the of the column to hold the current version
-            status.
+            Optional. String with the name of the column to hold the current
+            version status.
             Default 'scd_current'.
+
+        hashatt
+            Optional. String with the name of the column to hold the hash of
+            the attributes of each row.
+            Default 'scd_hash'.
 
         asof
             Optional. The date to use for fromatt for the 1st version of a row.
@@ -273,3 +282,14 @@ class SlowlyChangingDimension(object):
         # Source: http://www.pytables.org/usersguide/libref/structured_storage.html#tables.Table.where
         condvars = {'_' + att: row[att] for att in self.lookupatts}
         return condvars
+
+    def _hash_row(self, row):
+        """
+           See hashlib.algorithms_guaranteed for the complete algorithm list.
+        """
+        m = hashlib.sha1()
+
+        for column in row:
+            m.update(column)
+
+        return m.hexdigest()
