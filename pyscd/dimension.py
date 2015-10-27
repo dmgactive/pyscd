@@ -6,6 +6,10 @@ import numpy as np
 import tables as tb
 import hashlib
 from collections import defaultdict
+from pyscd.progress import Progress
+import logging
+logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger(__name__)
 
 
 class SlowlyChangingDimension(object):
@@ -21,7 +25,8 @@ class SlowlyChangingDimension(object):
                  versionatt='scd_version',
                  currentatt='scd_current',
                  hashatt='scd_hash',
-                 asof=None):
+                 asof=None,
+                 verbose=True):
         """
         Parameters
         ----------
@@ -110,7 +115,7 @@ class SlowlyChangingDimension(object):
         self.versionatt = versionatt
         self.currentatt = currentatt
         self.hashatt = hashatt
-        # TODO: use hash column to check if row was modified
+        self.verbose = verbose
 
         if not asof:
             today = datetime.date.today()
@@ -156,17 +161,25 @@ class SlowlyChangingDimension(object):
             self.__maxid = 0
 
         # Load index
+        log.debug('Loading dimension indexes...')
         self.__hashtable = defaultdict(list)
 
         indexes = self.connection.get_where_list('({!s} == True)'.
             format(self.currentatt))
 
-        for index in indexes:
-            row = self.connection[index]
-            rowhashvalue = row[self.hashatt].decode()
-            keyhashvalue = self._compute_hash_key(row)
+        i = 0
+        n = len(indexes)
+        with Progress(n) as p:
+            for index in indexes:
+                if self.verbose:
+                    p.update(i)
+                    i += 1
 
-            self.__hashtable[keyhashvalue].append(rowhashvalue)
+                row = self.connection[index]
+                rowhashvalue = row[self.hashatt].decode()
+                keyhashvalue = self._compute_hash_key(row)
+
+                self.__hashtable[keyhashvalue].append(rowhashvalue)
 
     def __exit__(self):
         self.connection.flush()
