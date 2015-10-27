@@ -161,8 +161,18 @@ class SlowlyChangingDimension(object):
             self.__maxid = 0
 
         # Load index
-        log.debug('Loading dimension indexes...')
+        # The same query with pandas is so fast
+        # https://github.com/pydata/pandas/blob/master/pandas/io/pytables.py
+        log.debug('Loading dimension indexes with Pandas...')
         self.__hashtable = defaultdict(list)
+
+        df = pd.read_hdf('gpi.h5', 'dimordens',
+                         #where='scd_current == {!s}'.format('1'),
+                         columns=self.lookupatts + [self.hashatt])
+        df = df[df[self.currentatt] == True]
+
+
+        log.debug('Loading dimension indexes with PyTables...')
 
         indexes = self.connection.get_where_list('({!s} == True)'.
             format(self.currentatt))
