@@ -138,6 +138,21 @@ class SlowlyChangingDimension(object):
             self.__maxid = 0
             self.__currentindex = pd.DataFrame()
 
+        # Create the conditions that we will need
+
+        # This gives (lookupatt1 == _lookupatt1)
+        #          & (lookupatt2 == _lookupatt2)
+        #          & ...
+        self.allkeyslookupcondition = ' & '.join(['({!s} == _{!s})'.\
+            format(att, att) for att in self.lookupatts])
+
+        # This gives (lookupatt1 == _lookupatt1)
+        #          & (lookupatt2 == _lookupatt2)
+        #          & ...
+        #          & (currentatt == True)
+        self.currentkeylookupcondition = self.allkeyslookupcondition +\
+            ' & ({!s} == True)'.format(self.currentatt)
+
     def __exit__(self):
         self.store.flush()
 
@@ -167,26 +182,34 @@ class SlowlyChangingDimension(object):
             # first time. HDFStore.append will create it automatically.
             self.insert(df)
         else:
-            df[self.hashatt] = df[self.attributes].apply(lambda x:
-                self._compute_hash(x), axis=1)
+            # Computes hash using attributes columns
+            df[self.hashatt] = df[self.attributes].\
+                apply(lambda x: self._compute_hash(x), axis=1)
 
+            # Set lookup attributes as index
             df.set_index(self.lookupatts, inplace=True)
 
+            # Find the rows that do not exists in the preloaded index
             new = df.loc[~df.index.isin(self.__currentindex.index)]
             if not new.empty:
+                # These are the new rows. Insert the first version.
                 self.insert(new.reset_index())
 
+            # Find the rows that exists in the preloaded index, but with a
+            # different hash. This means the row was modified, so we add the new
+            # version.
             modified = df.merge(self.__currentindex,
                 left_index=True, right_index=True)
             modified = modified.loc[
                 modified[self.hashatt + '_x'] != modified[self.hashatt + '_y']]
 
             if not modified.empty:
-                print('TEVE MODIFICAÇÃO')
-                print(modified, '\n')
-                self.__perform_type1_updates(modified)
-                self.__track_type2_history(modified)
+                modified.reset_index(inplace=True)
 
+                if self.type1atts:
+                    self.__perform_type1_updates(modified)
+                if self.type2atts:
+                    self.__track_type2_history(modified)
 
     def insert(self, df, version=1):
         """Insert the given row.
@@ -199,16 +222,47 @@ class SlowlyChangingDimension(object):
         df[self.toatt] = self.maxto
         df[self.versionatt] = version
         df[self.currentatt] = True
-        df[self.hashatt] = df[self.attributes].apply(lambda x:
-            self._compute_hash(x), axis=1)
+        df[self.hashatt] = df[self.attributes].\
+            apply(lambda x: self._compute_hash(x), axis=1)
 
         self.store.append(self.name, df, min_itemsize=255, data_columns=True)
-
 
     def __perform_type1_updates(self, modified):
         """Find and update all rows with same Lookup Attributes.
         """
-        pass
+        # Open file
+        h5file = tb.open_file(self.store.filename, mode='a')
+
+        # Open table
+        table = h5file.get_node('/{!s}/table'.format(self.name))
+
+        for row in modified.itertuples(index=False):
+            rowdata = dict(zip(modified.columns, row))
+
+            # Find all coordinates of these lookup attributes
+            condvars = self._build_condvars(rowdata)
+            coords = table.get_where_list(
+                self.allkeyslookupcondition, condvars)
+
+            # Read all existing rows of these lookup attributes
+            tablerows = table.read_coordinates(coords)
+
+            # Update rows type 1 attributes
+            for type1att in self.type1atts:
+                 tablerows[type1att][:] = rowdata[type1att]
+
+            # Update hash
+            for tablerow in tablerows:
+                print('old hash:', tablerow[self.hashatt])
+                tablerow[self.hashatt] = self._compute_hash_row(rowdata)
+                print('new hash:', tablerow[self.hashatt])
+
+            # Update dimension table
+            table.modify_coordinates(coords, tablerows)
+
+        h5file.flush()
+        h5file.close()
+        del h5file
 
     def __track_type2_history(self, modified):
         """Track history of type 2 columns. The following actions are performed:
@@ -220,8 +274,7 @@ class SlowlyChangingDimension(object):
         pass
 
     def _getnextid(self):
-        self.__maxid += 1
-        return self.__maxid
+        return self.store[self.name][self.key].max() + 1
 
     def _compute_hash(self, df):
         """Computes hash of the entire row.
@@ -229,6 +282,17 @@ class SlowlyChangingDimension(object):
         """
         value = repr(df.values).encode()
         return hashlib.sha1(value).hexdigest()
+
+    def _compute_hash_row(self, row):
+        """Computes hash of the entire row.
+           See hashlib.algorithms_guaranteed for the complete algorithm list.
+        """
+        m = hashlib.sha1()
+        for att in self.attributes:
+            value = str(row[att]).encode()
+            if pd.notnull(value):
+                m.update(value)
+        return m.hexdigest()
 
     def _get_current_indexes(self):
         """Make a DataFrame with the lookup attributes and hash of all currently
@@ -239,3 +303,15 @@ class SlowlyChangingDimension(object):
             columns=self.lookupatts + [self.hashatt])
         currentindexes.set_index(self.lookupatts, inplace=True)
         return currentindexes
+
+    def _build_condvars(self, row):
+        """Build the dict to be used as condvars of a query, like this:
+           {_order: order, _line: line}
+
+           This dict can then passed to PyTables Table.where()
+           and Table.get_where_list() functions
+
+           Source: http://www.pytables.org/usersguide/libref/structured_storage.html#tables.Table.where
+        """
+        condvars = {'_' + att: row[att] for att in self.lookupatts}
+        return condvars
