@@ -16,7 +16,7 @@ class SlowlyChangingDimension(object):
     """A class for accessing a slowly changing dimension of types 1 and 2.
     """
 
-    def __init__(self, connection,
+    def __init__(self, store, name,
                  lookupatts, type1atts, type2atts,
                  key='scd_id',
                  fromatt='scd_valid_from',
@@ -31,15 +31,11 @@ class SlowlyChangingDimension(object):
         Parameters
         ----------
 
-        connection
-            Required. The Tables.Table pointing to this dimension. The table
-            should already have exists and include the dimension specific
-            columns:
-            - scd_id          = tb.Int64Col(pos=0)
-            - scd_valid_from  = tb.Int64Col(pos=1)
-            - scd_valid_to    = tb.Int64Col(pos=2)
-            - scd_version     = tb.Int16Col(pos=3)
-            - scd_current     = tb.BoolCol(pos=4)
+        store
+            Required. The pandas.HDFStore pointing to this dimension.
+
+        name
+            Required. The name of the dimension to be stored in the file.
 
         lookupatts
             Required. A list of the columns that uniquely identify a dimension
@@ -101,10 +97,11 @@ class SlowlyChangingDimension(object):
             raise ValueError('Type 1 attributes argument must be a list')
         if not isinstance(type2atts, list):
             raise ValueError('Type 2 attributes argument must be a list')
-        if not isinstance(connection, tb.Table):
-            raise TypeError('Connection argument must be a PyTables table')
+        if not isinstance(store, pd.HDFStore):
+            raise TypeError('store argument must be a pandas HDFStore')
 
-        self.connection = connection
+        self.store = store
+        self.name = name
         self.lookupatts = lookupatts
         self.type1atts = type1atts
         self.type2atts = type2atts
@@ -132,67 +129,17 @@ class SlowlyChangingDimension(object):
         self._type1_modified_count = 0
         self._type2_modified_count = 0
 
-        self._v_string_type = [k for k, v in
-                               self.connection.description._v_types.items()
-                               if v == 'string']
+        self.exists = self.name in self.store
 
-        # Create the conditions that we will need
-
-        # This gives (lookupatt1 == _lookupatt1)
-        #          & (lookupatt2 == _lookupatt2)
-        #          & ...
-        self.allkeyslookupcondition = ' & '.join(['({!s} == _{!s})'.\
-            format(att, att) for att in self.lookupatts])
-
-        # This gives (lookupatt1 == _lookupatt1)
-        #          & (lookupatt2 == _lookupatt2)
-        #          & ...
-        #          & (currentatt == True)
-        self.currentkeylookupcondition =\
-            self.allkeyslookupcondition +\
-            ' & ({!s} == True)'.format(self.currentatt)
-
-        # Get the last used key
-        try:
-            # Select the key id of the last row.
-            self.__maxid = connection[-1:][self.key][0]
-        except IndexError:
-            # The table is empty, so we set __maxid to 0
+        if self.exists:
+            self.__maxid = self.store[self.name][self.key].max()
+            self.__currentindex = self._get_current_indexes()
+        else:
             self.__maxid = 0
-
-        # Load index
-        # The same query with pandas is so fast
-        # https://github.com/pydata/pandas/blob/master/pandas/io/pytables.py
-        log.debug('Loading dimension indexes with Pandas...')
-        self.__hashtable = defaultdict(list)
-
-        df = pd.read_hdf('gpi.h5', 'dimordens',
-                         #where='scd_current == {!s}'.format('1'),
-                         columns=self.lookupatts + [self.hashatt])
-        df = df[df[self.currentatt] == True]
-
-
-        log.debug('Loading dimension indexes with PyTables...')
-
-        indexes = self.connection.get_where_list('({!s} == True)'.
-            format(self.currentatt))
-
-        i = 0
-        n = len(indexes)
-        with Progress(n) as p:
-            for index in indexes:
-                if self.verbose:
-                    p.update(i)
-                    i += 1
-
-                row = self.connection[index]
-                rowhashvalue = row[self.hashatt].decode()
-                keyhashvalue = self._compute_hash_key(row)
-
-                self.__hashtable[keyhashvalue].append(rowhashvalue)
+            self.__currentindex = pd.DataFrame()
 
     def __exit__(self):
-        self.connection.flush()
+        self.store.flush()
 
     @property
     def new_rows(self):
@@ -209,155 +156,86 @@ class SlowlyChangingDimension(object):
     def lookup(self, tablerow):
         """Read the newest version of the row.
         """
-        condvars = {'_' + att: tablerow[att] for att in self.lookupatts}
-
-        row = self.connection.read_where(
-            self.currentkeylookupcondition, condvars)
-
-        if row:
-            return row
         return None
 
-    def update(self, row):
+    def update(self, df):
         """Update the dimension by inserting new rows, modifying type 1
            attributes and adding a new version of modified rows.
         """
-        keyhashvalue = self._compute_hash_key(row)
-        rowhashvalue = self._compute_hash_row(row)
+        if not self.exists:
+            # If dimension table does not exists, just insert it for the
+            # first time. HDFStore.append will create it automatically.
+            self.insert(df)
+        else:
+            df[self.hashatt] = df[self.attributes].apply(lambda x:
+                self._compute_hash(x), axis=1)
 
-        if not keyhashvalue in self.__hashtable:
-            # It is a new member. We add the first version.
-            self.insert(row)
-            self._new_count += 1
-        elif not rowhashvalue in self.__hashtable[keyhashvalue]:
-            # There is an existing version, but with a different hash.
+            df.set_index(self.lookupatts, inplace=True)
 
-            # Get the newest version
-            other = self.lookup(row)
+            new = df.loc[~df.index.isin(self.__currentindex.index)]
+            if not new.empty:
+                self.insert(new.reset_index())
 
-            # Check for modified type 1 attributes
-            for att in self.type1atts:
-                if row[att] != other[att]:
-                    self.__perform_type1_updates(row, other)
-                    self._type1_modified_count += 1
-                    break
+            modified = df.merge(self.__currentindex,
+                left_index=True, right_index=True)
+            modified = modified.loc[
+                modified[self.hashatt + '_x'] != modified[self.hashatt + '_y']]
 
-            # Check for modified type 2 attributes
-            for att in self.type2atts:
-                # Is it still necessary to check for null values?
-                # All string columns are store as bytes b'text' now,
-                # so I'm removing this from the condition:
-                # (pd.notnull(row[att]) or pd.notnull(other[att]))
-                if row[att] != other[att]:
-                    self.__track_type2_history(row, other)
-                    self._type2_modified_count += 1
-                    break
+            if not modified.empty:
+                print('TEVE MODIFICAÇÃO')
+                print(modified)
+                self.__perform_type1_updates(modified)
+                self.__track_type2_history(modified)
 
-    def insert(self, rowdata, version=1):
+
+    def insert(self, df, version=1):
         """Insert the given row.
         """
-        keyhashvalue = self._compute_hash_key(rowdata)
-        rowhashvalue = self._compute_hash_row(rowdata)
-        self.__hashtable[keyhashvalue].append(rowhashvalue)
-
-        row = self.connection.row
-
-        # Fill new row columns
-        for col in self.attributes:
-            row[col] = rowdata[col]
+        hashvalue = self._compute_hash(df)
 
         # Fill SCD columns
-        row[self.key] = self._getnextid()
-        row[self.fromatt] = self.asof
-        row[self.toatt] = self.maxto
-        row[self.versionatt] = version
-        row[self.currentatt] = True
-        row[self.hashatt] = rowhashvalue
+        df[self.key] = self._getnextid()
+        df[self.fromatt] = self.asof
+        df[self.toatt] = self.maxto
+        df[self.versionatt] = version
+        df[self.currentatt] = True
+        df[self.hashatt] = df[self.attributes].apply(lambda x:
+            self._compute_hash(x), axis=1)
 
-        row.append()
+        self.store.append(self.name, df, min_itemsize=255, data_columns=True)
 
-    def __perform_type1_updates(self, rowdata, other):
+
+    def __perform_type1_updates(self, modified):
         """Find and update all rows with same Lookup Attributes.
         """
-        condvars = self._build_condvars(rowdata)
+        pass
 
-        # Find coordinates of all rows using lookup columns
-        coords = self.connection.get_where_list(
-            self.allkeyslookupcondition, condvars)
-        rows = self.connection.read_coordinates(coords)
-
-        # Update type 1 attributes
-        for type1att in self.type1atts:
-            rows[type1att][:] = rowdata[type1att]
-
-        # Update hash
-        for row in rows:
-            row[self.hashatt] = self._compute_hash_row(row)
-
-        # Update dimension
-        self.connection.modify_coordinates(coords, rows)
-
-    def __track_type2_history(self, tablerow, other):
+    def __track_type2_history(self, modified):
         """Track history of type 2 columns. The following actions are performed:
            - Find the current active row and inactivate it:
              - Set valid to attribute to asof.
              - Set current attribute to False.
            - Insert a new version.
         """
-        condvars = self._build_condvars(tablerow)
-
-        # Find coordinates of the current row using lookup columns
-        coord = self.connection.get_where_list(
-            self.currentkeylookupcondition, condvars)
-        row = self.connection.read_coordinates(coord)
-
-        # Update valid to and current columns
-        row[self.toatt] = self.asof
-        row[self.currentatt] = False
-
-        # Update dimension
-        self.connection.modify_coordinates(coord, row)
-
-        # Insert new version of the row
-        self.insert(tablerow, version=other[self.versionatt] + 1)
+        pass
 
     def _getnextid(self):
         self.__maxid += 1
         return self.__maxid
 
-    def _build_condvars(self, row):
-        # Build the dict to be used as condvars of a query, like this:
-        # {order: _order, line: _line}
-        # This dict can then passed to PyTables Table.where()
-        # and Table.get_where_list() functions
-        # Source: http://www.pytables.org/usersguide/libref/structured_storage.html#tables.Table.where
-        condvars = {'_' + att: row[att] for att in self.lookupatts}
-        return condvars
-
-    def _compute_hash_row(self, row):
+    def _compute_hash(self, df):
         """Computes hash of the entire row.
            See hashlib.algorithms_guaranteed for the complete algorithm list.
         """
-        m = hashlib.sha1()
+        value = repr(df.values).encode()
+        return hashlib.sha1(value).hexdigest()
 
-        for col in self.attributes:
-            value = row[col]
-            if not isinstance(value, bytes):
-                value = str(value).encode()
-            m.update(value)
-
-        return m.hexdigest()
-
-    def _compute_hash_key(self, row):
-        """Computes hash of the key fields.
-           See hashlib.algorithms_guaranteed for the complete algorithm list.
+    def _get_current_indexes(self):
+        """Make a DataFrame with the lookup attributes and hash of all currently
+           active rows.
         """
-        m = hashlib.sha1()
-
-        for col in self.lookupatts:
-            value = row[col]
-            if not isinstance(value, bytes):
-                value = str(value).encode()
-            m.update(value)
-
-        return m.hexdigest()
+        currentindexes = self.store.select(
+            self.name, where='{!s}=True'.format(self.currentatt),
+            columns=self.lookupatts + [self.hashatt])
+        currentindexes.set_index(self.lookupatts, inplace=True)
+        return currentindexes
