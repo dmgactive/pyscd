@@ -6,6 +6,10 @@ import pandas as pd
 import tables as tb
 from pyscd.dimension import SlowlyChangingDimension as scd
 
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
 
 def import_orders(outfilename, infilename):
     df = pd.read_csv(infilename)
@@ -45,7 +49,7 @@ class TestDimension(unittest.TestCase):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
         self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='blosc')
+            complevel=9, complib='zlib')
 
         dim = scd(store=self.store,
                   name='dimorders',
@@ -76,7 +80,7 @@ class TestDimension(unittest.TestCase):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
         self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='blosc')
+            complevel=9, complib='zlib')
 
         dim = scd(store=self.store,
                   name='dimorders',
@@ -108,7 +112,7 @@ class TestDimension(unittest.TestCase):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
         self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='blosc')
+            complevel=9, complib='zlib')
 
         dim = scd(store=self.store,
                   name='dimorders',
@@ -155,7 +159,7 @@ class TestDimension(unittest.TestCase):
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
         self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='blosc')
+            complevel=9, complib='zlib')
 
         dim = scd(store=self.store,
                   name='dimorders',
@@ -172,7 +176,7 @@ class TestDimension(unittest.TestCase):
         import_orders(self.filename, 'tests/data/modify 1 row.csv')
 
         self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='blosc')
+            complevel=9, complib='zlib')
 
         dim = scd(store=self.store,
                   name='dimorders',
@@ -186,11 +190,11 @@ class TestDimension(unittest.TestCase):
         del chunk
 
         result = self.store['dimorders']
+        print(result)
         self.assertEqual(len(result), 2)
 
-        print(result)
-
         result = result.loc[result['order'] == 1]
+        self.assertFalse(result.empty)
         self.assertEqual(result['order'][0], '1')
         self.assertEqual(result['line'][0], 10)
         self.assertEqual(result['status'][0], 'Completed')

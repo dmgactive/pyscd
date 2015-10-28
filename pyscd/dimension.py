@@ -183,7 +183,7 @@ class SlowlyChangingDimension(object):
 
             if not modified.empty:
                 print('TEVE MODIFICAÇÃO')
-                print(modified)
+                print(modified, '\n')
                 self.__perform_type1_updates(modified)
                 self.__track_type2_history(modified)
 
