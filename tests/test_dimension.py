@@ -45,10 +45,7 @@ class TestDimension(unittest.TestCase):
     def test_import_row_for_the_first_time(self):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
-        self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order'],
                   type1atts=[],
@@ -59,6 +56,9 @@ class TestDimension(unittest.TestCase):
             print(chunk.values.ravel())
             dim.update(chunk)
         del chunk
+
+        self.store = pd.HDFStore(self.filename, mode='a',
+            complevel=9, complib='zlib')
 
         result = self.store['dimorders']
         self.assertEqual(len(result), 1)
@@ -75,30 +75,30 @@ class TestDimension(unittest.TestCase):
     def test_import_same_row_again_does_not_duplicate(self):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
+        dim = scd(path=self.filename,
+                  name='dimorders',
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
+            dim.update(chunk)
+        del chunk
+
+        dim = scd(path=self.filename,
+                  name='dimorders',
+                  lookupatts=['order', 'line'],
+                  type1atts=[],
+                  type2atts=['status', 'currency'],
+                  asof='2015-10-23')
+
+        for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
+            dim.update(chunk)
+        del chunk
+
         self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
-                  name='dimorders',
-                  lookupatts=['order', 'line'],
-                  type1atts=[],
-                  type2atts=['status', 'currency'],
-                  asof='2015-10-23')
-
-        for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
-            dim.update(chunk)
-        del chunk
-
-        dim = scd(connection=self.store,
-                  name='dimorders',
-                  lookupatts=['order', 'line'],
-                  type1atts=[],
-                  type2atts=['status', 'currency'],
-                  asof='2015-10-23')
-
-        for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
-            dim.update(chunk)
-        del chunk
 
         result = self.store['dimorders']
         self.assertEqual(len(result), 1)
@@ -107,10 +107,7 @@ class TestDimension(unittest.TestCase):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
-        self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -124,7 +121,7 @@ class TestDimension(unittest.TestCase):
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -134,6 +131,9 @@ class TestDimension(unittest.TestCase):
         for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
             dim.update(chunk)
         del chunk
+
+        self.store = pd.HDFStore(self.filename, mode='a',
+            complevel=9, complib='zlib')
 
         result = self.store['dimorders']
         self.assertEqual(len(result), 2)
@@ -152,10 +152,7 @@ class TestDimension(unittest.TestCase):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=['status'],
@@ -165,8 +162,7 @@ class TestDimension(unittest.TestCase):
         for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
             dim.update(chunk)
         del chunk
-
-        self.store.close()
+        del dim
 
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/modify 1 row.csv')
@@ -174,7 +170,7 @@ class TestDimension(unittest.TestCase):
         self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=['status'],
@@ -184,6 +180,10 @@ class TestDimension(unittest.TestCase):
         for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
             dim.update(chunk)
         del chunk
+        del dim
+
+        self.store = pd.HDFStore(self.filename, mode='a',
+            complevel=9, complib='zlib')
 
         result = self.store['dimorders']
         print('Result Dataframe:\n', result)
@@ -205,10 +205,7 @@ class TestDimension(unittest.TestCase):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -218,16 +215,12 @@ class TestDimension(unittest.TestCase):
         for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
             dim.update(chunk)
         del chunk
-
-        self.store.close()
+        del dim
 
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/modify 1 row.csv')
 
-        self.store = pd.HDFStore(self.filename, mode='a',
-            complevel=9, complib='zlib')
-
-        dim = scd(connection=self.store,
+        dim = scd(path=self.filename,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -237,6 +230,10 @@ class TestDimension(unittest.TestCase):
         for chunk in pd.read_hdf(self.filename, 'orders', chunksize=1000):
             dim.update(chunk)
         del chunk
+        del dim
+
+        self.store = pd.HDFStore(self.filename, mode='a',
+            complevel=9, complib='zlib')
 
         result = self.store['dimorders']
         print('Result Dataframe:\n', result)

@@ -14,7 +14,7 @@ class SlowlyChangingDimension(object):
     """A class for accessing a slowly changing dimension of types 1 and 2.
     """
 
-    def __init__(self, connection, name,
+    def __init__(self, path, name,
                  lookupatts, type1atts, type2atts,
                  key='scd_id',
                  fromatt='scd_valid_from',
@@ -28,8 +28,8 @@ class SlowlyChangingDimension(object):
         Parameters
         ----------
 
-        connection
-            Required. The pandas.HDFStore pointing to this dimension.
+        path
+            Required. The path of the HDF file.
 
         name
             Required. The name of the dimension to be stored in the file.
@@ -89,11 +89,13 @@ class SlowlyChangingDimension(object):
             raise ValueError('Type 1 attributes argument must be a list')
         if not isinstance(type2atts, list):
             raise ValueError('Type 2 attributes argument must be a list')
-        if not isinstance(connection, pd.HDFStore):
-            raise TypeError('store argument must be a pandas HDFStore')
 
-        self.connection = connection
+        self.path = path
         self.name = name
+
+        self.connection = pd.HDFStore(self.path, mode='a',
+                                      complevel=9, complib='zlib')
+
         self.lookupatts = lookupatts
         self.type1atts = type1atts
         self.type2atts = type2atts
@@ -146,6 +148,7 @@ class SlowlyChangingDimension(object):
 
     def __exit__(self):
         self.connection.flush()
+        self.connection.close()
 
     @property
     def new_rows(self):
