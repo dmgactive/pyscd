@@ -5,8 +5,6 @@ import pandas as pd
 import numpy as np
 import tables as tb
 import hashlib
-from collections import defaultdict
-from pyscd.progress import Progress
 import logging
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -16,13 +14,12 @@ class SlowlyChangingDimension(object):
     """A class for accessing a slowly changing dimension of types 1 and 2.
     """
 
-    def __init__(self, store, name,
+    def __init__(self, connection, name,
                  lookupatts, type1atts, type2atts,
                  key='scd_id',
                  fromatt='scd_valid_from',
                  toatt='scd_valid_to',
                  maxto='2199-12-31',
-                 versionatt='scd_version',
                  currentatt='scd_current',
                  hashatt='scd_hash',
                  asof=None,
@@ -31,7 +28,7 @@ class SlowlyChangingDimension(object):
         Parameters
         ----------
 
-        store
+        connection
             Required. The pandas.HDFStore pointing to this dimension.
 
         name
@@ -67,11 +64,6 @@ class SlowlyChangingDimension(object):
             string in the format 'yyyy-MM-dd'.
             Default '2199-12-31'.
 
-        versionatt
-            Optional. String with the name of the column to hold the version
-            number.
-            Default 'scd_version'.
-
         currentatt
             Optional. String with the name of the column to hold the current
             version status.
@@ -97,10 +89,10 @@ class SlowlyChangingDimension(object):
             raise ValueError('Type 1 attributes argument must be a list')
         if not isinstance(type2atts, list):
             raise ValueError('Type 2 attributes argument must be a list')
-        if not isinstance(store, pd.HDFStore):
+        if not isinstance(connection, pd.HDFStore):
             raise TypeError('store argument must be a pandas HDFStore')
 
-        self.store = store
+        self.connection = connection
         self.name = name
         self.lookupatts = lookupatts
         self.type1atts = type1atts
@@ -109,7 +101,6 @@ class SlowlyChangingDimension(object):
         self.key = key
         self.fromatt = fromatt
         self.toatt = toatt
-        self.versionatt = versionatt
         self.currentatt = currentatt
         self.hashatt = hashatt
         self.verbose = verbose
@@ -129,11 +120,11 @@ class SlowlyChangingDimension(object):
         self._type1_modified_count = 0
         self._type2_modified_count = 0
 
-        self.exists = self.name in self.store
+        self.exists = self.name in self.connection
 
         if self.exists:
-            self.__maxid = self.store[self.name][self.key].max()
-            self.__currentindex = self._get_current_indexes()
+            self.__maxid = self.connection[self.name][self.key].max()
+            self._load_cache()
         else:
             self.__maxid = 0
             self.__currentindex = pd.DataFrame()
@@ -154,7 +145,7 @@ class SlowlyChangingDimension(object):
             ' & ({!s} == True)'.format(self.currentatt)
 
     def __exit__(self):
-        self.store.flush()
+        self.connection.flush()
 
     @property
     def new_rows(self):
@@ -180,11 +171,11 @@ class SlowlyChangingDimension(object):
         if not self.exists:
             # If dimension table does not exists, just insert it for the
             # first time. HDFStore.append will create it automatically.
-            self.insert(df)
+            self.insert(df.copy())
         else:
             # Computes hash using attributes columns
-            df[self.hashatt] = df[self.attributes].\
-                apply(lambda x: self._compute_hash(x), axis=1)
+            df[self.hashatt] = df.apply(lambda x: self._compute_hash(x),
+                                        axis=1)
 
             # Set lookup attributes as index
             df.set_index(self.lookupatts, inplace=True)
@@ -192,50 +183,57 @@ class SlowlyChangingDimension(object):
             # Find the rows that do not exists in the preloaded index
             new = df.loc[~df.index.isin(self.__currentindex.index)]
             if not new.empty:
-                # These are the new rows. Insert the first version.
-                self.insert(new.reset_index())
+                # Insert the first version of new rows.
+                self.insert(new.reset_index().copy())
 
-            # Find the rows that exists in the preloaded index, but with a
-            # different hash. This means the row was modified, so we add the new
-            # version.
-            modified = df.merge(self.__currentindex,
-                left_index=True, right_index=True)
-            modified = modified.loc[
-                modified[self.hashatt + '_x'] != modified[self.hashatt + '_y']]
-
-            if not modified.empty:
+            if self.type1atts:
+                # Find the rows that exists in the preloaded index, but with a
+                # different hash.
+                modified = df.merge(self.__currentindex,
+                    left_index=True, right_index=True)
+                modified = modified.loc[
+                    modified[self.hashatt + '_x'] != modified[self.hashatt + '_y']]
                 modified.reset_index(inplace=True)
 
-                if self.type1atts:
-                    self.__perform_type1_updates(modified)
-                if self.type2atts:
-                    self.__track_type2_history(modified)
+                if not modified.empty:
+                    self.__perform_type1_updates(modified[self.attributes])
 
-    def insert(self, df, version=1):
+            if self.type2atts:
+                # Find the rows that exists in the preloaded index, but with a
+                # different hash.
+                modified = df.merge(self.__currentindex,
+                    left_index=True, right_index=True)
+                modified = modified.loc[
+                    modified[self.hashatt + '_x'] != modified[self.hashatt + '_y']]
+                modified.reset_index(inplace=True)
+
+                if not modified.empty:
+                    self.__track_type2_history(modified[self.attributes])
+
+    def insert(self, df):
         """Insert the given row.
         """
-        hashvalue = self._compute_hash(df)
-
         # Fill SCD columns
-        df[self.key] = self._getnextid()
+        df[self.key] = 0
+        df[self.key] = df[self.key].apply(lambda x: self._getnextid())
         df[self.fromatt] = self.asof
         df[self.toatt] = self.maxto
-        df[self.versionatt] = version
         df[self.currentatt] = True
-        df[self.hashatt] = df[self.attributes].\
-            apply(lambda x: self._compute_hash(x), axis=1)
+        df[self.hashatt] = df.apply(lambda x: self._compute_hash(x),
+                                    axis=1)
 
-        self.store.append(self.name, df, min_itemsize=255, data_columns=True)
+        self.connection.append(self.name, df, min_itemsize=255, data_columns=True)
 
     def __perform_type1_updates(self, modified):
         """Find and update all rows with same Lookup Attributes.
         """
         # Open file
-        h5file = tb.open_file(self.store.filename, mode='a')
+        h5file = tb.open_file(self.connection.filename, mode='a')
 
         # Open table
         table = h5file.get_node('/{!s}/table'.format(self.name))
 
+        # For each row in DataFrame...
         for row in modified.itertuples(index=False):
             rowdata = dict(zip(modified.columns, row))
 
@@ -253,9 +251,7 @@ class SlowlyChangingDimension(object):
 
             # Update hash
             for tablerow in tablerows:
-                print('old hash:', tablerow[self.hashatt])
-                tablerow[self.hashatt] = self._compute_hash_row(rowdata)
-                print('new hash:', tablerow[self.hashatt])
+                tablerow[self.hashatt] = self._compute_hash(rowdata)
 
             # Update dimension table
             table.modify_coordinates(coords, tablerows)
@@ -264,6 +260,8 @@ class SlowlyChangingDimension(object):
         h5file.close()
         del h5file
 
+        self._load_cache()
+
     def __track_type2_history(self, modified):
         """Track history of type 2 columns. The following actions are performed:
            - Find the current active row and inactivate it:
@@ -271,34 +269,64 @@ class SlowlyChangingDimension(object):
              - Set current attribute to False.
            - Insert a new version.
         """
-        pass
+        # Open file
+        h5file = tb.open_file(self.connection.filename, mode='a')
+
+        # Open table
+        table = h5file.get_node('/{!s}/table'.format(self.name))
+
+        # For each row in DataFrame...
+        for row in modified.itertuples(index=False):
+            rowdata = dict(zip(modified.columns, row))
+
+            # Find coordinate of current version using the lookup attributes
+            condvars = self._build_condvars(rowdata)
+            coord = table.get_where_list(
+                self.currentkeylookupcondition, condvars)
+
+            # Read the current version
+            tablerow = table.read_coordinates(coord)
+
+            # Expire the old version
+            tablerow[self.toatt] = self.asof
+            tablerow[self.currentatt] = False
+
+            # Update dimension table
+            table.modify_coordinates(coord, tablerow)
+
+        h5file.flush()
+        h5file.close()
+        del h5file
+
+        # Insert the new version of updated rows
+        self.insert(modified.copy())
+
 
     def _getnextid(self):
-        return self.store[self.name][self.key].max() + 1
+        self.__maxid += 1
+        return self.__maxid
 
-    def _compute_hash(self, df):
-        """Computes hash of the entire row.
-           See hashlib.algorithms_guaranteed for the complete algorithm list.
-        """
-        value = repr(df.values).encode()
-        return hashlib.sha1(value).hexdigest()
-
-    def _compute_hash_row(self, row):
+    def _compute_hash(self, row):
         """Computes hash of the entire row.
            See hashlib.algorithms_guaranteed for the complete algorithm list.
         """
         m = hashlib.sha1()
+
+        # self.attributes is a list, so the hash will always be updated in
+        # the same order.
         for att in self.attributes:
             value = str(row[att]).encode()
-            if pd.notnull(value):
-                m.update(value)
+            m.update(value)
         return m.hexdigest()
+
+    def _load_cache(self):
+        self.__currentindex = self._get_current_indexes()
 
     def _get_current_indexes(self):
         """Make a DataFrame with the lookup attributes and hash of all currently
            active rows.
         """
-        currentindexes = self.store.select(
+        currentindexes = self.connection.select(
             self.name, where='{!s}=True'.format(self.currentatt),
             columns=self.lookupatts + [self.hashatt])
         currentindexes.set_index(self.lookupatts, inplace=True)

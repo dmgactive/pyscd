@@ -31,18 +31,24 @@ def import_workcenters(outfilename, workbook, worksheet):
 
 class TestDimension(unittest.TestCase):
     def setUp(self):
-        self.filename = '{!s}.h5'.format(__name__)
+        self.filename = 'test.h5'
+
+        if os.path.isfile(self.filename):
+            os.remove(self.filename)
 
     def tearDown(self):
-        pass
+        self.store.close()
+
+        if os.path.isfile(self.filename):
+            os.remove(self.filename)
 
     def test_import_row_for_the_first_time(self):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order'],
                   type1atts=[],
@@ -54,28 +60,25 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        result = store['dimorders']
+        result = self.store['dimorders']
         self.assertEqual(len(result), 1)
-        self.assertEqual(result['order'][0], '1')
-        self.assertEqual(result['line'][0], 10)
-        self.assertEqual(result['status'][0], 'Not Delivered')
-        self.assertEqual(result['currency'][0], 'USD')
-        self.assertEqual(result['scd_id'][0], 1)
-        self.assertEqual(result['scd_valid_from'][0], 1445558400000000000)
-        self.assertEqual(result['scd_valid_to'][0], 7258032000000000000)
-        self.assertEqual(result['scd_version'][0], 1)
-        self.assertEqual(result['scd_current'][0], True)
-        self.assertEqual(result['scd_hash'][0], '5357057d66f2ef4886169ace62e9892a6c479575')
-
-        store.close()
+        self.assertEqual(result['order'].values[0], '1')
+        self.assertEqual(result['line'].values[0], 10)
+        self.assertEqual(result['status'].values[0], 'Not Delivered')
+        self.assertEqual(result['currency'].values[0], 'USD')
+        self.assertEqual(result['scd_id'].values[0], 1)
+        self.assertEqual(result['scd_valid_from'].values[0], 1445558400000000000)
+        self.assertEqual(result['scd_valid_to'].values[0], 7258032000000000000)
+        self.assertEqual(result['scd_current'].values[0], True)
+        self.assertEqual(result['scd_hash'].values[0], '39510ad9dc54f9e05bb3cf9db33ab1a1b0b66114')
 
     def test_import_same_row_again_does_not_duplicate(self):
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -86,7 +89,7 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -97,19 +100,17 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        result = store['dimorders']
+        result = self.store['dimorders']
         self.assertEqual(len(result), 1)
-
-        store.close()
 
     def test_add_new_row(self):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/orders x1.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -123,7 +124,7 @@ class TestDimension(unittest.TestCase):
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -134,32 +135,27 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        result = store['dimorders']
-        print(result)
+        result = self.store['dimorders']
         self.assertEqual(len(result), 2)
 
-        result = result.loc[result['line'] == 20]
-        self.assertEqual(result['order'][1], '1')
-        self.assertEqual(result['line'][1], 20)
-        self.assertEqual(result['status'][1], 'Completed')
-        self.assertEqual(result['currency'][1], 'USD')
-        self.assertEqual(result['scd_id'][1], 2)
-        self.assertEqual(result['scd_valid_from'][1], 1445558400000000000)
-        self.assertEqual(result['scd_valid_to'][1], 7258032000000000000)
-        self.assertEqual(result['scd_version'][1], 1)
-        self.assertEqual(result['scd_current'][1], True)
-        self.assertEqual(result['scd_hash'][1], '4297cd7da3357b8fdd754c47a39ffae562fb7cd4')
-
-        store.close()
+        self.assertEqual(result['order'].values[1], '1')
+        self.assertEqual(result['line'].values[1], 20)
+        self.assertEqual(result['status'].values[1], 'Completed')
+        self.assertEqual(result['currency'].values[1], 'USD')
+        self.assertEqual(result['scd_id'].values[1], 2)
+        self.assertEqual(result['scd_valid_from'].values[1], 1445558400000000000)
+        self.assertEqual(result['scd_valid_to'].values[1], 7258032000000000000)
+        self.assertEqual(result['scd_current'].values[1], True)
+        self.assertEqual(result['scd_hash'].values[1], '47580ba821ac3f942c13582f88a73c644241396a')
 
     def test_modify_type_1_column(self):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=['status'],
@@ -170,15 +166,15 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        store.close()
+        self.store.close()
 
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/modify 1 row.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=['status'],
@@ -189,33 +185,30 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        result = store['dimorders']
+        result = self.store['dimorders']
         print('Result Dataframe:\n', result)
         self.assertEqual(len(result), 2)
 
-        result = result.loc[result['order'] == '1']
         self.assertFalse(result.empty)
-        self.assertEqual(result['order'][0], '1')
-        self.assertEqual(result['line'][0], 10)
-        self.assertEqual(result['status'][0], 'Completed')
-        self.assertEqual(result['currency'][0], 'USD')
-        self.assertEqual(result['scd_id'][0], 1)
-        self.assertEqual(result['scd_valid_from'][0], 1445558400000000000)
-        self.assertEqual(result['scd_valid_to'][0], 7258032000000000000)
-        self.assertEqual(result['scd_version'][0], 1)
-        self.assertEqual(result['scd_current'][0], True)
-        self.assertEqual(result['scd_hash'][0], '0d4f629999f2dd1a2b37059f7f5364564a51ad37')
-
-        store.close()
+        self.assertEqual(result['order'].values[0], '1')
+        self.assertEqual(result['line'].values[0], 10)
+        self.assertEqual(result['status'].values[0], 'Completed')
+        self.assertEqual(result['currency'].values[0], 'USD')
+        self.assertEqual(result['scd_id'].values[0], 1)
+        self.assertEqual(result['scd_id'].values[1], 2)
+        self.assertEqual(result['scd_valid_from'].values[0], 1445558400000000000)
+        self.assertEqual(result['scd_valid_to'].values[0], 7258032000000000000)
+        self.assertEqual(result['scd_current'].values[0], True)
+        self.assertEqual(result['scd_hash'].values[0], '0d4f629999f2dd1a2b37059f7f5364564a51ad37')
 
     def test_modify_type_2_column(self):
         # Update dimension with first file
         import_orders(self.filename, 'tests/data/add 1 row.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -226,15 +219,15 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        store.close()
+        self.store.close()
 
         # Update dimension with second file
         import_orders(self.filename, 'tests/data/modify 1 row.csv')
 
-        store = pd.HDFStore(self.filename, mode='a',
+        self.store = pd.HDFStore(self.filename, mode='a',
             complevel=9, complib='zlib')
 
-        dim = scd(store=store,
+        dim = scd(connection=self.store,
                   name='dimorders',
                   lookupatts=['order', 'line'],
                   type1atts=[],
@@ -245,21 +238,23 @@ class TestDimension(unittest.TestCase):
             dim.update(chunk)
         del chunk
 
-        result = store['dimorders']
+        result = self.store['dimorders']
         print('Result Dataframe:\n', result)
         self.assertEqual(len(result), 3)
 
-        result = result.loc[result['order'] == '1']
         self.assertFalse(result.empty)
-        self.assertEqual(result['order'][0], '1')
-        self.assertEqual(result['line'][0], 10)
-        self.assertEqual(result['status'][0], 'Completed')
-        self.assertEqual(result['currency'][0], 'USD')
-        self.assertEqual(result['scd_id'][0], 1)
-        self.assertEqual(result['scd_valid_from'][0], 1445558400000000000)
-        self.assertEqual(result['scd_valid_to'][0], 7258032000000000000)
-        self.assertEqual(result['scd_version'][0], 1)
-        self.assertEqual(result['scd_current'][0], True)
-        self.assertEqual(result['scd_hash'][0], '0d4f629999f2dd1a2b37059f7f5364564a51ad37')
-
-        store.close()
+        self.assertEqual(result['order'].values[0], '1')
+        self.assertEqual(result['line'].values[0], 10)
+        self.assertEqual(result['status'].values[0], 'Not Delivered')
+        self.assertEqual(result['status'].values[2], 'Completed')
+        self.assertEqual(result['currency'].values[0], 'USD')
+        self.assertEqual(result['scd_id'].values[0], 1)
+        self.assertEqual(result['scd_id'].values[2], 3)
+        self.assertEqual(result['scd_valid_from'].values[0], 1445558400000000000)
+        self.assertEqual(result['scd_valid_from'].values[2], 1445558400000000000)
+        self.assertEqual(result['scd_valid_to'].values[0], 1445558400000000000)
+        self.assertEqual(result['scd_valid_to'].values[2], 7258032000000000000)
+        self.assertEqual(result['scd_current'].values[0], False)
+        self.assertEqual(result['scd_current'].values[2], True)
+        self.assertEqual(result['scd_hash'].values[0], '39510ad9dc54f9e05bb3cf9db33ab1a1b0b66114')
+        self.assertEqual(result['scd_hash'].values[2], '0d4f629999f2dd1a2b37059f7f5364564a51ad37')
